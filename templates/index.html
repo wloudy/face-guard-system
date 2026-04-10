@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Face Guard • AI Surveillance</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0a0a0a;
+            color: #e0f2fe;
+        }
+        .bg-animation {
+            position: fixed;
+            inset: 0;
+            background: linear-gradient(45deg, #0f172a, #1e2937, #312e81, #0f172a);
+            background-size: 400% 400%;
+            animation: gradientShift 25s ease infinite;
+            z-index: -2;
+        }
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .camera-container {
+            width: 640px
+            height: 480px;           /* Фиксированная высота — как у включённой камеры */
+            display: flex;
+            flex-direction: column;
+            border: 2px solid rgba(74, 222, 128, 0.6);
+            border-radius: 20px;
+            overflow: hidden;
+            background: #111827;
+            transition: all 0.4s ease;
+        }
+        .camera-container:hover {
+            border-color: #4ade80;
+        }
+
+        .camera-header {
+            background: #1f2937;
+            padding: 12px 20px;
+            flex-shrink: 0;
+        }
+
+        .camera-stream {
+            flex-grow: 1;
+            background: #000;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stream-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .no-camera {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #64748b;
+            background: #1f2937;
+        }
+    </style>
+</head>
+<body class="min-h-screen relative">
+    <div class="bg-animation"></div>
+
+    <div class="relative z-10 max-w-7xl mx-auto p-6">
+        <div class="text-center mb-10">
+            <h1 class="text-5xl font-bold bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500 bg-clip-text text-transparent">
+                <i class="fas fa-eye"></i> Face Guard
+            </h1>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div class="lg:col-span-8 space-y-8">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="cameras-container"></div>
+            </div>
+
+            <!-- Панель настроек -->
+            <div class="lg:col-span-4 space-y-6">
+                <div class="glass rounded-3xl p-6 bg-slate-900/70 backdrop-blur-xl">
+                    <h2 class="text-xl font-semibold mb-5 flex items-center gap-3">
+                        <i class="fas fa-sliders-h text-emerald-400"></i> Настройки
+                    </h2>
+                    <div class="space-y-6">
+                        <div>
+                            <div class="flex justify-between text-sm mb-2">
+                                <span>Scale Factor</span>
+                                <span id="scale_val" class="font-mono">0.25</span>
+                            </div>
+                            <input type="range" id="scale_factor" min="0.1" max="0.5" step="0.05" value="0.25" class="w-full accent-emerald-500">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-sm mb-2">
+                                <span>Tolerance</span>
+                                <span id="tolerance_val" class="font-mono">0.55</span>
+                            </div>
+                            <input type="range" id="tolerance" min="0.3" max="0.7" step="0.01" value="0.55" class="w-full accent-emerald-500">
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm mb-1">Cooldown (сек)</label>
+                                <input type="number" id="notify_cooldown" value="35" class="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3">
+                            </div>
+                            <div>
+                                <label class="block text-sm mb-1">Видео (сек)</label>
+                                <input type="number" id="video_duration" value="6" class="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3">
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <input type="checkbox" id="use_avi" checked class="w-5 h-5 accent-emerald-500">
+                            <label for="use_avi" class="text-sm">AVI формат</label>
+                        </div>
+                    </div>
+
+                    <button id="apply-btn" class="mt-8 w-full bg-gradient-to-r from-emerald-500 to-cyan-500 py-4 rounded-2xl font-semibold text-lg">
+                        Применить настройки
+                    </button>
+                </div>
+
+                <div class="glass rounded-3xl p-6 bg-slate-900/70 backdrop-blur-xl">
+                    <h2 class="text-xl font-semibold mb-5 text-red-400 flex items-center gap-3">
+                        <i class="fas fa-bell"></i> События
+                    </h2>
+                    <div id="events-list" class="space-y-4 max-h-[480px] overflow-y-auto"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+
+        function createCameras(cameras) {
+            const container = document.getElementById('cameras-container');
+            container.innerHTML = '';
+
+            cameras.forEach(id => {
+                const div = document.createElement('div');
+                div.innerHTML = `
+                    <div class="camera-container" id="frame-${id}">
+                        <div class="camera-header flex justify-between items-center">
+                            <div class="flex items-center gap-3">
+                                <span class="text-emerald-400">●</span>
+                                <span class="font-semibold">Камера ${id + 1}</span>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="toggle-${id}" checked onchange="toggleCamera(${id})" class="sr-only peer">
+                                <div class="w-11 h-6 bg-gray-700 rounded-full peer peer-checked:bg-emerald-500"></div>
+                                <div class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-all peer-checked:translate-x-5"></div>
+                            </label>
+                        </div>
+
+                        <div class="camera-stream" id="stream-container-${id}">
+                            <img src="/video_feed/${id}" class="stream-img" id="stream-${id}">
+                        </div>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        window.toggleCamera = function(camId) {
+            const enabled = document.getElementById(`toggle-${camId}`).checked;
+            const container = document.getElementById(`stream-container-${camId}`);
+
+            if (enabled) {
+                container.innerHTML = `<img src="/video_feed/${camId}" class="stream-img" id="stream-${camId}">`;
+            } else {
+                container.innerHTML = `
+                    <div class="no-camera">
+                        <i class="fas fa-video-slash text-6xl mb-6 text-slate-500"></i>
+                        <p class="text-slate-400 font-medium text-lg">Камера отключена</p>
+                        <p class="text-slate-500">Нет сигнала</p>
+                    </div>
+                `;
+            }
+
+            // Уведомляем сервер
+            fetch('/update_settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ camera_enabled: { [camId]: enabled } })
+            });
+        };
+
+        document.getElementById('apply-btn').addEventListener('click', () => {
+            const payload = {
+                scale_factor: parseFloat(document.getElementById('scale_factor').value),
+                tolerance: parseFloat(document.getElementById('tolerance').value),
+                notify_cooldown: parseInt(document.getElementById('notify_cooldown').value),
+                video_duration: parseInt(document.getElementById('video_duration').value),
+                use_avi: document.getElementById('use_avi').checked
+            };
+
+            fetch('/update_settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(() => {
+                const btn = document.getElementById('apply-btn');
+                btn.textContent = '✓ Применено!';
+                setTimeout(() => btn.textContent = 'Применить настройки', 2000);
+            });
+        });
+
+        socket.on('new_event', (data) => {
+            const list = document.getElementById('events-list');
+            const html = `
+                <div class="bg-slate-800/80 border border-red-900/50 rounded-2xl p-5">
+                    <div class="flex justify-between">
+                        <div>
+                            <div class="text-emerald-400 font-mono">${data.timestamp}</div>
+                            <div class="font-semibold">${data.cam_name}</div>
+                            <div class="text-red-400">${data.message}</div>
+                        </div>
+                        <div class="flex gap-2">
+                            <a href="/alerts/${data.photo}" target="_blank" class="bg-slate-700 hover:bg-red-900 px-5 py-3 rounded-2xl text-sm">📸</a>
+                            <a href="/alerts/${data.video}" target="_blank" class="bg-slate-700 hover:bg-red-900 px-5 py-3 rounded-2xl text-sm">🎥</a>
+                        </div>
+                    </div>
+                </div>`;
+            list.insertAdjacentHTML('afterbegin', html);
+        });
+
+        // Запуск
+        createCameras([0, 1]);
+    </script>
+</body>
+</html>
