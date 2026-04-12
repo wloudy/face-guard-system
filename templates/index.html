@@ -30,7 +30,7 @@
 
         .camera-container {
             width: 640px
-            height: 480px;           /* Фиксированная высота — как у включённой камеры */
+            height: 480px;
             display: flex;
             flex-direction: column;
             border: 2px solid rgba(74, 222, 128, 0.6);
@@ -78,10 +78,18 @@
     <div class="bg-animation"></div>
 
     <div class="relative z-10 max-w-7xl mx-auto p-6">
-        <div class="text-center mb-10">
-            <h1 class="text-5xl font-bold bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500 bg-clip-text text-transparent">
-                <i class="fas fa-eye"></i> Face Guard
-            </h1>
+        <div class="flex justify-between items-center mb-10">
+            <div class="text-center flex-1">
+                <h1 class="text-5xl font-bold bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500 bg-clip-text text-transparent">
+                    <i class="fas fa-eye"></i> Face Guard
+                </h1>
+            </div>
+
+            <a href="/events"
+               class="flex items-center gap-3 bg-red-600 hover:bg-red-700 transition-colors px-8 py-4 rounded-3xl font-semibold text-lg">
+                <i class="fas fa-bell"></i>
+                События
+            </a>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -89,7 +97,6 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="cameras-container"></div>
             </div>
 
-            <!-- Панель настроек -->
             <div class="lg:col-span-4 space-y-6">
                 <div class="glass rounded-3xl p-6 bg-slate-900/70 backdrop-blur-xl">
                     <h2 class="text-xl font-semibold mb-5 flex items-center gap-3">
@@ -190,7 +197,6 @@
                 `;
             }
 
-            // Уведомляем сервер
             fetch('/update_settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -237,7 +243,6 @@
             list.insertAdjacentHTML('afterbegin', html);
         });
 
-        // Запуск
         createCameras([0, 1]);
     </script>
 </body>
