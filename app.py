@@ -122,6 +122,17 @@ def update_settings():
 def serve_alert(filename):
     return send_from_directory(AppConfig.ALERTS_DIR, filename)
 
+@app.route('/events')
+def events_page():
+    with events_lock:
+        sorted_events = sorted(events, key=lambda x: x.get('timestamp', ''), reverse=True)
+    return render_template('events.html', events=sorted_events)
+
+@app.route('/api/events')
+def api_events():
+    with events_lock:
+        sorted_events = sorted(events, key=lambda x: x.get('timestamp', ''), reverse=True)
+    return jsonify(sorted_events)
 
 if __name__ == '__main__':
     os.makedirs(AppConfig.ALERTS_DIR, exist_ok=True)
