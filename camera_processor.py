@@ -29,8 +29,7 @@ class CameraProcessor:
         os.makedirs(AppConfig.ALERTS_DIR, exist_ok=True)
 
     def start(self):
-        if self.running:
-            return
+        if self.running: return
         self.running = True
         self.thread = threading.Thread(target=self._process_loop, daemon=True)
         self.thread.start()
@@ -42,7 +41,7 @@ class CameraProcessor:
             self.thread.join(timeout=3)
         if self.cap:
             self.cap.release()
-        print(f"[CAM {self.cam_id}] Остановлен")
+        print(f"[CAM {self.cam_id}] Поток остановлен")
 
     def is_running(self):
         return self.running
@@ -63,8 +62,9 @@ class CameraProcessor:
             self.running = False
             return
 
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(f"[CAM {self.cam_id}] Разрешение: {width}x{height}")
 
         while self.running:
             if not AppConfig.CAMERA_ENABLED.get(self.cam_id, False):
@@ -73,7 +73,7 @@ class CameraProcessor:
 
             ret, frame = self.cap.read()
             if not ret or frame is None:
-                time.sleep(0.1)
+                time.sleep(0.05)
                 continue
 
             display_frame = frame.copy()
@@ -97,7 +97,6 @@ class CameraProcessor:
                 matches = face_recognition.compare_faces(self.known_face_encodings, encoding, tolerance=AppConfig.TOLERANCE)
                 name = "Unknown"
                 color = (0, 0, 255)
-
                 if True in matches:
                     name = self.known_face_names[matches.index(True)]
                     color = (0, 255, 0)
@@ -115,38 +114,61 @@ class CameraProcessor:
 
             if unknown_detected and (time.time() - self.last_notification > AppConfig.NOTIFY_COOLDOWN):
                 self.last_notification = time.time()
-                self._handle_unknown_detection(display_frame.copy())   # копия, чтобы не блокировать
+                threading.Thread(
+                    target=self._handle_unknown_detection,
+                    args=(display_frame.copy(), width, height),
+                    daemon=True
+                ).start()
 
             time.sleep(0.03)
 
-    def _handle_unknown_detection(self, frame):
+    def _handle_unknown_detection(self, display_frame, orig_width, orig_height):
+        print(f"[CAM {self.cam_id}] 🚨 Неизвестное лицо обнаружено!")
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         cam_str = f"cam{self.cam_id}"
+
         photo_filename = f"photo_{cam_str}_{timestamp}.jpg"
-        video_filename = f"video_{cam_str}_{timestamp}.avi"
+        video_discord_filename = f"video_discord_{cam_str}_{timestamp}.avi"  # лёгкое для Discord
+        video_full_filename = f"video_full_{cam_str}_{timestamp}.avi"  # качественное для сайта
+
         photo_path = os.path.join(AppConfig.ALERTS_DIR, photo_filename)
-        video_path = os.path.join(AppConfig.ALERTS_DIR, video_filename)
-
-        cv2.imwrite(photo_path, frame)
-
-        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-        out = cv2.VideoWriter(video_path, fourcc, 15.0, (AppConfig.WINDOW_WIDTH, AppConfig.WINDOW_HEIGHT))
-
-        frames_written = 0
-        start_time = time.time()
-
-        while time.time() - start_time < AppConfig.VIDEO_DURATION and self.running:
-            ret, f = self.cap.read()
-            if ret and f is not None:
-                small = cv2.resize(f, (AppConfig.WINDOW_WIDTH, AppConfig.WINDOW_HEIGHT))
-                out.write(small)
-                frames_written += 1
-        out.release()
-
-        print(f"[CAM {self.cam_id}] Записано кадров: {frames_written}")
+        video_discord_path = os.path.join(AppConfig.ALERTS_DIR, video_discord_filename)
+        video_full_path = os.path.join(AppConfig.ALERTS_DIR, video_full_filename)
 
         try:
-            webhook = DiscordWebhook(url=AppConfig.DISCORD_WEBHOOK_URL, username=f"Face Guard (Камера {self.cam_id + 1})")
+            cv2.imwrite(photo_path, display_frame)
+
+            print(f"[CAM {self.cam_id}] 🎥 Запись лёгкого видео для Discord...")
+            fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+            out_discord = cv2.VideoWriter(video_discord_path, fourcc, 15.0, (640, 360))
+
+            frames_discord = 0
+            start = time.time()
+            while time.time() - start < AppConfig.VIDEO_DURATION and self.running:
+                ret, f = self.cap.read()
+                if ret and f is not None:
+                    small = cv2.resize(f, (640, 360))
+                    out_discord.write(small)
+                    frames_discord += 1
+            out_discord.release()
+
+            print(f"[CAM {self.cam_id}] 🎥 Запись качественного видео для сайта...")
+            out_full = cv2.VideoWriter(video_full_path, fourcc, 25.0, (orig_width, orig_height))
+
+            frames_full = 0
+            start = time.time()
+            while time.time() - start < AppConfig.VIDEO_DURATION and self.running:
+                ret, f = self.cap.read()
+                if ret and f is not None:
+                    out_full.write(f)
+                    frames_full += 1
+            out_full.release()
+
+            print(f"[CAM {self.cam_id}] ✅ Лёгкое: {frames_discord} кадров | Качественное: {frames_full} кадров")
+
+            webhook = DiscordWebhook(url=AppConfig.DISCORD_WEBHOOK_URL,
+                                     username=f"Face Guard (Камера {self.cam_id + 1})")
             embed = DiscordEmbed(
                 title=f"🚨 UNKNOWN FACE — Камера {self.cam_id + 1}",
                 description="Обнаружен незнакомец",
@@ -157,28 +179,34 @@ class CameraProcessor:
 
             with open(photo_path, "rb") as f:
                 webhook.add_file(file=f.read(), filename=photo_filename)
-
             webhook.execute()
 
-            if os.path.exists(video_path) and frames_written > 20:
-                webhook_video = DiscordWebhook(url=AppConfig.DISCORD_WEBHOOK_URL, username=f"Face Guard (Камера {self.cam_id + 1})")
-                webhook_video.content = f"📹 Видео с камеры {self.cam_id + 1} ({AppConfig.VIDEO_DURATION} сек)"
-                with open(video_path, "rb") as f:
-                    webhook_video.add_file(file=f.read(), filename=video_filename)
-                webhook_video.execute()
+            print(f"[CAM {self.cam_id}] ✅ Фото отправлено в Discord")
+
+            if os.path.exists(video_discord_path) and frames_discord > 15:
+                size_mb = os.path.getsize(video_discord_path) / (1024 * 1024)
+                if size_mb < 8.0:
+                    webhook_video = DiscordWebhook(url=AppConfig.DISCORD_WEBHOOK_URL,
+                                                   username=f"Face Guard (Камера {self.cam_id + 1})")
+                    webhook_video.content = f"📹 Видео с камеры {self.cam_id + 1} ({AppConfig.VIDEO_DURATION} сек)"
+                    with open(video_discord_path, "rb") as f:
+                        webhook_video.add_file(file=f.read(), filename=video_discord_filename)
+                    webhook_video.execute()
+                    print(f"[CAM {self.cam_id}] ✅ Лёгкое видео отправлено в Discord")
+
+            event_data = {
+                'timestamp': datetime.now().strftime("%H:%M:%S"),
+                'cam_id': self.cam_id,
+                'cam_name': f"Камера {self.cam_id + 1}",
+                'photo': photo_filename,
+                'video': video_full_filename,
+                'message': 'Обнаружен Unknown!'
+            }
+            self.socketio.emit('new_event', event_data)
+            if self.event_callback:
+                self.event_callback(event_data)
+
+            print(f"[CAM {self.cam_id}] ✅ Событие отправлено на сайт")
 
         except Exception as e:
-            print(f"[CAM {self.cam_id}] Discord error: {e}")
-
-        event_data = {
-            'timestamp': datetime.now().strftime("%H:%M:%S"),
-            'cam_id': self.cam_id,
-            'cam_name': f"Камера {self.cam_id + 1}",
-            'photo': photo_filename,
-            'video': video_filename if os.path.exists(video_path) else None,
-            'message': 'Обнаружен Unknown!'
-        }
-
-        self.socketio.emit('new_event', event_data)
-        if self.event_callback:
-            self.event_callback(event_data)
+            print(f"[CAM {self.cam_id}] Ошибка обработки тревоги: {e}")
