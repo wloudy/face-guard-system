@@ -78,7 +78,6 @@ class CameraProcessor:
 
             display_frame = frame.copy()
 
-            # Распознавание лиц
             scale = AppConfig.SCALE_FACTOR
             small_frame = cv2.resize(frame, (0, 0), fx=scale, fy=scale)
             rgb_small = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
@@ -123,7 +122,6 @@ class CameraProcessor:
 
             time.sleep(0.03)
 
-    # ====================== ТРЕВОГА ======================
     def _handle_unknown_detection(self, display_frame, orig_width, orig_height):
         print(f"[CAM {self.cam_id}] 🚨 Неизвестное лицо обнаружено!")
 
@@ -143,15 +141,12 @@ class CameraProcessor:
 
             duration = AppConfig.VIDEO_DURATION
 
-            # === Качественное видео для сайта (XVID — более стабильный) ===
             print(f"[CAM {self.cam_id}] 🎥 Запись качественного видео для сайта...")
             self._record_video(video_full_path, orig_width, orig_height, fps=20, fourcc='XVID')
 
-            # === Лёгкое видео для Discord ===
             print(f"[CAM {self.cam_id}] 🎥 Создание сжатой версии для Discord...")
             self._record_video(video_discord_path, 640, 360, fps=15, fourcc='MJPG', resize=True)
 
-            # ==================== DISCORD ====================
             webhook = DiscordWebhook(url=AppConfig.DISCORD_WEBHOOK_URL,
                                      username=f"Face Guard (Камера {self.cam_id + 1})")
             embed = DiscordEmbed(title=f"🚨 UNKNOWN FACE — Камера {self.cam_id + 1}",
@@ -164,7 +159,6 @@ class CameraProcessor:
             webhook.execute()
             print(f"[CAM {self.cam_id}] ✅ Фото отправлено в Discord")
 
-            # Отправка видео в Discord
             if os.path.exists(video_discord_path):
                 size_mb = os.path.getsize(video_discord_path) / (1024 * 1024)
                 if size_mb < 8.0:
@@ -176,7 +170,6 @@ class CameraProcessor:
                     vw.execute()
                     print(f"[CAM {self.cam_id}] ✅ Лёгкое видео отправлено в Discord")
 
-            # ==================== СОБЫТИЕ НА САЙТ ====================
             event_data = {
                 'timestamp': datetime.now().strftime("%H:%M:%S"),
                 'cam_id': self.cam_id,
@@ -194,7 +187,6 @@ class CameraProcessor:
         except Exception as e:
             print(f"[CAM {self.cam_id}] Ошибка обработки тревоги: {e}")
 
-    # ====================== УНИВЕРСАЛЬНАЯ ЗАПИСЬ ВИДЕО ======================
     def _record_video(self, output_path, width, height, fps=20, fourcc='XVID', resize=False):
         codec = cv2.VideoWriter_fourcc(*fourcc)
         out = cv2.VideoWriter(output_path, codec, fps, (width, height))
