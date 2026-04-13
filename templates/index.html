@@ -6,6 +6,7 @@
     <title>Face Guard • AI Surveillance</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
@@ -28,16 +29,49 @@
             100% { background-position: 0% 50%; }
         }
 
+        .tabs {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            border-bottom: 2px solid #334155;
+            margin-bottom: 2rem;
+        }
+
+        .tab-button {
+            padding: 14px 40px;
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: #94a3b8;
+            transition: color 0.3s ease;
+            position: relative;
+            z-index: 2;
+        }
+
+        .tab-button.active {
+            color: white;
+        }
+
+        .slider {
+            position: absolute;
+            bottom: -2px;
+            height: 4px;
+            background: linear-gradient(to right, #10b981, #34d399);
+            border-radius: 9999px;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1;
+        }
+
         .camera-container {
-            width: 640px
-            height: 480px;
+            width: 100%;
+            max-width: 560px;
+            height: 420px;
             display: flex;
             flex-direction: column;
             border: 2px solid rgba(74, 222, 128, 0.6);
             border-radius: 20px;
             overflow: hidden;
             background: #111827;
-            transition: all 0.4s ease;
+            transition: all 0.3s ease;
         }
         .camera-container:hover {
             border-color: #4ade80;
@@ -47,6 +81,9 @@
             background: #1f2937;
             padding: 12px 20px;
             flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .camera-stream {
@@ -54,6 +91,9 @@
             background: #000;
             position: relative;
             overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .stream-img {
@@ -71,6 +111,7 @@
             justify-content: center;
             color: #64748b;
             background: #1f2937;
+            text-align: center;
         }
     </style>
 </head>
@@ -78,79 +119,109 @@
     <div class="bg-animation"></div>
 
     <div class="relative z-10 max-w-7xl mx-auto p-6">
-        <div class="flex justify-between items-center mb-10">
-            <div class="text-center flex-1">
-                <h1 class="text-5xl font-bold bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500 bg-clip-text text-transparent">
-                    <i class="fas fa-eye"></i> Face Guard
-                </h1>
-            </div>
-
-            <a href="/events"
-               class="flex items-center gap-3 bg-red-600 hover:bg-red-700 transition-colors px-8 py-4 rounded-3xl font-semibold text-lg">
-                <i class="fas fa-bell"></i>
-                События
-            </a>
+        <div class="text-center mb-10">
+            <h1 class="text-5xl font-bold bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500 bg-clip-text text-transparent">
+                <i class="fas fa-eye"></i> Face Guard
+            </h1>
+            <p class="text-slate-400 mt-2">Система видеомониторинга с распознаванием лиц</p>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <div class="lg:col-span-8 space-y-8">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="cameras-container"></div>
-            </div>
+        <div class="tabs">
+            <button onclick="switchTab(0)" id="tab-0" class="tab-button active">📹 Камеры</button>
+            <button onclick="switchTab(1)" id="tab-1" class="tab-button">🛎 События</button>
+            <div id="slider" class="slider"></div>
+        </div>
 
-            <div class="lg:col-span-4 space-y-6">
-                <div class="glass rounded-3xl p-6 bg-slate-900/70 backdrop-blur-xl">
-                    <h2 class="text-xl font-semibold mb-5 flex items-center gap-3">
-                        <i class="fas fa-sliders-h text-emerald-400"></i> Настройки
-                    </h2>
-                    <div class="space-y-6">
-                        <div>
-                            <div class="flex justify-between text-sm mb-2">
-                                <span>Scale Factor</span>
-                                <span id="scale_val" class="font-mono">0.25</span>
-                            </div>
-                            <input type="range" id="scale_factor" min="0.1" max="0.5" step="0.05" value="0.25" class="w-full accent-emerald-500">
-                        </div>
-                        <div>
-                            <div class="flex justify-between text-sm mb-2">
-                                <span>Tolerance</span>
-                                <span id="tolerance_val" class="font-mono">0.55</span>
-                            </div>
-                            <input type="range" id="tolerance" min="0.3" max="0.7" step="0.01" value="0.55" class="w-full accent-emerald-500">
-                        </div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm mb-1">Cooldown (сек)</label>
-                                <input type="number" id="notify_cooldown" value="35" class="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3">
-                            </div>
-                            <div>
-                                <label class="block text-sm mb-1">Видео (сек)</label>
-                                <input type="number" id="video_duration" value="6" class="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3">
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <input type="checkbox" id="use_avi" checked class="w-5 h-5 accent-emerald-500">
-                            <label for="use_avi" class="text-sm">AVI формат</label>
-                        </div>
-                    </div>
+        <div id="tab-content-0">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 justify-center" id="cameras-container"></div>
+        </div>
 
-                    <button id="apply-btn" class="mt-8 w-full bg-gradient-to-r from-emerald-500 to-cyan-500 py-4 rounded-2xl font-semibold text-lg">
-                        Применить настройки
-                    </button>
-                </div>
-
-                <div class="glass rounded-3xl p-6 bg-slate-900/70 backdrop-blur-xl">
-                    <h2 class="text-xl font-semibold mb-5 text-red-400 flex items-center gap-3">
-                        <i class="fas fa-bell"></i> События
-                    </h2>
-                    <div id="events-list" class="space-y-4 max-h-[480px] overflow-y-auto"></div>
-                </div>
-            </div>
+        <div id="tab-content-1" class="hidden">
+            <div id="events-container" class="space-y-6"></div>
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <div id="settings-panel" class="fixed bottom-6 right-6 bg-slate-900/95 backdrop-blur-xl rounded-3xl p-6 border border-slate-700 shadow-2xl w-80">
+        <h2 class="text-xl font-semibold mb-5 flex items-center gap-3">
+            <i class="fas fa-sliders-h text-emerald-400"></i> Настройки
+        </h2>
+
+        <div class="space-y-6 text-sm">
+            <div>
+                <div class="flex justify-between mb-2">
+                    <span>Scale Factor</span>
+                    <span id="scale_val" class="font-mono">0.25</span>
+                </div>
+                <input type="range" id="scale_factor" min="0.1" max="0.5" step="0.05" value="0.25" class="w-full accent-emerald-500">
+            </div>
+            <div>
+                <div class="flex justify-between mb-2">
+                    <span>Tolerance</span>
+                    <span id="tolerance_val" class="font-mono">0.55</span>
+                </div>
+                <input type="range" id="tolerance" min="0.3" max="0.7" step="0.01" value="0.55" class="w-full accent-emerald-500">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm mb-1">Cooldown (сек)</label>
+                    <input type="number" id="notify_cooldown" value="35" class="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-center">
+                </div>
+                <div>
+                    <label class="block text-sm mb-1">Видео (сек)</label>
+                    <input type="number" id="video_duration" value="6" class="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-center">
+                </div>
+            </div>
+        </div>
+
+        <button id="apply-btn"
+                class="mt-6 w-full bg-emerald-600 hover:bg-emerald-700 py-3 rounded-2xl font-medium">
+            Применить настройки
+        </button>
+    </div>
+
     <script>
         const socket = io();
+        let currentTab = 0;
+        const slider = document.getElementById('slider');
+
+        function switchTab(tab) {
+            currentTab = tab;
+
+            document.getElementById('tab-content-0').classList.toggle('hidden', tab !== 0);
+            document.getElementById('tab-content-1').classList.toggle('hidden', tab !== 1);
+
+            document.getElementById('tab-0').classList.toggle('active', tab === 0);
+            document.getElementById('tab-1').classList.toggle('active', tab === 1);
+
+            const activeButton = document.getElementById(`tab-${tab}`);
+            const rect = activeButton.getBoundingClientRect();
+            const tabsRect = activeButton.parentElement.getBoundingClientRect();
+
+            slider.style.left = `${rect.left - tabsRect.left}px`;
+            slider.style.width = `${rect.width}px`;
+
+            document.getElementById('settings-panel').style.display = (tab === 0) ? 'block' : 'none';
+        }
+
+        document.getElementById('apply-btn').addEventListener('click', () => {
+            const payload = {
+                scale_factor: parseFloat(document.getElementById('scale_factor').value),
+                tolerance: parseFloat(document.getElementById('tolerance').value),
+                notify_cooldown: parseInt(document.getElementById('notify_cooldown').value),
+                video_duration: parseInt(document.getElementById('video_duration').value)
+            };
+
+            fetch('/update_settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(() => {
+                const btn = document.getElementById('apply-btn');
+                const originalText = btn.textContent;
+                btn.textContent = '✓ Применено!';
+                setTimeout(() => btn.textContent = originalText, 2000);
+            }).catch(err => console.error('Ошибка применения настроек:', err));
+        });
 
         function createCameras(cameras) {
             const container = document.getElementById('cameras-container');
@@ -160,7 +231,7 @@
                 const div = document.createElement('div');
                 div.innerHTML = `
                     <div class="camera-container" id="frame-${id}">
-                        <div class="camera-header flex justify-between items-center">
+                        <div class="camera-header">
                             <div class="flex items-center gap-3">
                                 <span class="text-emerald-400">●</span>
                                 <span class="font-semibold">Камера ${id + 1}</span>
@@ -171,7 +242,6 @@
                                 <div class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-all peer-checked:translate-x-5"></div>
                             </label>
                         </div>
-
                         <div class="camera-stream" id="stream-container-${id}">
                             <img src="/video_feed/${id}" class="stream-img" id="stream-${id}">
                         </div>
@@ -204,46 +274,44 @@
             });
         };
 
-        document.getElementById('apply-btn').addEventListener('click', () => {
-            const payload = {
-                scale_factor: parseFloat(document.getElementById('scale_factor').value),
-                tolerance: parseFloat(document.getElementById('tolerance').value),
-                notify_cooldown: parseInt(document.getElementById('notify_cooldown').value),
-                video_duration: parseInt(document.getElementById('video_duration').value),
-                use_avi: document.getElementById('use_avi').checked
-            };
-
-            fetch('/update_settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            }).then(() => {
-                const btn = document.getElementById('apply-btn');
-                btn.textContent = '✓ Применено!';
-                setTimeout(() => btn.textContent = 'Применить настройки', 2000);
-            });
+        socket.on('new_event', (data) => {
+            addEventToPage(data);
         });
 
-        socket.on('new_event', (data) => {
-            const list = document.getElementById('events-list');
+        function addEventToPage(event) {
+            const container = document.getElementById('events-container');
             const html = `
-                <div class="bg-slate-800/80 border border-red-900/50 rounded-2xl p-5">
+                <div class="event-card bg-slate-900 rounded-3xl p-6 border border-slate-700">
                     <div class="flex justify-between">
                         <div>
-                            <div class="text-emerald-400 font-mono">${data.timestamp}</div>
-                            <div class="font-semibold">${data.cam_name}</div>
-                            <div class="text-red-400">${data.message}</div>
-                        </div>
-                        <div class="flex gap-2">
-                            <a href="/alerts/${data.photo}" target="_blank" class="bg-slate-700 hover:bg-red-900 px-5 py-3 rounded-2xl text-sm">📸</a>
-                            <a href="/alerts/${data.video}" target="_blank" class="bg-slate-700 hover:bg-red-900 px-5 py-3 rounded-2xl text-sm">🎥</a>
+                            <div class="text-emerald-400 font-mono">${event.timestamp}</div>
+                            <div class="text-xl font-semibold mt-1">${event.cam_name}</div>
+                            <div class="text-red-400">${event.message}</div>
                         </div>
                     </div>
-                </div>`;
-            list.insertAdjacentHTML('afterbegin', html);
-        });
+                    <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <p class="text-sm text-slate-400 mb-3">Фото момента</p>
+                            <a href="/alerts/${event.photo}" target="_blank">
+                                <img src="/alerts/${event.photo}" class="rounded-2xl w-full border border-slate-700">
+                            </a>
+                        </div>
+                        <div>
+                            <p class="text-sm text-slate-400 mb-3">Видео тревоги</p>
+                            <a href="/alerts/${event.video}" target="_blank"
+                               class="block bg-slate-800 hover:bg-slate-700 p-8 rounded-2xl text-center">
+                                <i class="fas fa-download text-4xl mb-4 text-emerald-400"></i>
+                                <p class="font-medium">Скачать видео</p>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('afterbegin', html);
+        }
 
         createCameras([0, 1]);
+        switchTab(0);
     </script>
 </body>
 </html>
