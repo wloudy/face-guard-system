@@ -4,8 +4,8 @@ import time
 import os
 import threading
 from datetime import datetime
-from discord_webhook import DiscordWebhook, DiscordEmbed
 
+from discord_webhook import DiscordWebhook, DiscordEmbed
 from config import AppConfig
 
 face_recognition_lock = threading.Lock()
@@ -78,6 +78,7 @@ class CameraProcessor:
 
             display_frame = frame.copy()
 
+            # Распознавание лиц
             scale = AppConfig.SCALE_FACTOR
             small_frame = cv2.resize(frame, (0, 0), fx=scale, fy=scale)
             rgb_small = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
@@ -122,6 +123,7 @@ class CameraProcessor:
 
             time.sleep(0.03)
 
+    # ====================== ТРЕВОГА ======================
     def _handle_unknown_detection(self, display_frame, orig_width, orig_height):
         print(f"[CAM {self.cam_id}] 🚨 Неизвестное лицо обнаружено!")
 
@@ -129,71 +131,52 @@ class CameraProcessor:
         cam_str = f"cam{self.cam_id}"
 
         photo_filename = f"photo_{cam_str}_{timestamp}.jpg"
-        video_discord_filename = f"video_discord_{cam_str}_{timestamp}.avi"  # лёгкое для Discord
-        video_full_filename = f"video_full_{cam_str}_{timestamp}.avi"  # качественное для сайта
+        video_full_filename = f"video_full_{cam_str}_{timestamp}.avi"      # для сайта
+        video_discord_filename = f"video_discord_{cam_str}_{timestamp}.avi"
 
         photo_path = os.path.join(AppConfig.ALERTS_DIR, photo_filename)
-        video_discord_path = os.path.join(AppConfig.ALERTS_DIR, video_discord_filename)
         video_full_path = os.path.join(AppConfig.ALERTS_DIR, video_full_filename)
+        video_discord_path = os.path.join(AppConfig.ALERTS_DIR, video_discord_filename)
 
         try:
             cv2.imwrite(photo_path, display_frame)
 
-            print(f"[CAM {self.cam_id}] 🎥 Запись лёгкого видео для Discord...")
-            fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-            out_discord = cv2.VideoWriter(video_discord_path, fourcc, 15.0, (640, 360))
+            duration = AppConfig.VIDEO_DURATION
 
-            frames_discord = 0
-            start = time.time()
-            while time.time() - start < AppConfig.VIDEO_DURATION and self.running:
-                ret, f = self.cap.read()
-                if ret and f is not None:
-                    small = cv2.resize(f, (640, 360))
-                    out_discord.write(small)
-                    frames_discord += 1
-            out_discord.release()
-
+            # === Качественное видео для сайта (XVID — более стабильный) ===
             print(f"[CAM {self.cam_id}] 🎥 Запись качественного видео для сайта...")
-            out_full = cv2.VideoWriter(video_full_path, fourcc, 25.0, (orig_width, orig_height))
+            self._record_video(video_full_path, orig_width, orig_height, fps=20, fourcc='XVID')
 
-            frames_full = 0
-            start = time.time()
-            while time.time() - start < AppConfig.VIDEO_DURATION and self.running:
-                ret, f = self.cap.read()
-                if ret and f is not None:
-                    out_full.write(f)
-                    frames_full += 1
-            out_full.release()
+            # === Лёгкое видео для Discord ===
+            print(f"[CAM {self.cam_id}] 🎥 Создание сжатой версии для Discord...")
+            self._record_video(video_discord_path, 640, 360, fps=15, fourcc='MJPG', resize=True)
 
-            print(f"[CAM {self.cam_id}] ✅ Лёгкое: {frames_discord} кадров | Качественное: {frames_full} кадров")
-
+            # ==================== DISCORD ====================
             webhook = DiscordWebhook(url=AppConfig.DISCORD_WEBHOOK_URL,
                                      username=f"Face Guard (Камера {self.cam_id + 1})")
-            embed = DiscordEmbed(
-                title=f"🚨 UNKNOWN FACE — Камера {self.cam_id + 1}",
-                description="Обнаружен незнакомец",
-                color=0xff0000
-            )
+            embed = DiscordEmbed(title=f"🚨 UNKNOWN FACE — Камера {self.cam_id + 1}",
+                                 description="Обнаружен незнакомец", color=0xff0000)
             embed.set_timestamp()
             webhook.add_embed(embed)
 
             with open(photo_path, "rb") as f:
                 webhook.add_file(file=f.read(), filename=photo_filename)
             webhook.execute()
-
             print(f"[CAM {self.cam_id}] ✅ Фото отправлено в Discord")
 
-            if os.path.exists(video_discord_path) and frames_discord > 15:
+            # Отправка видео в Discord
+            if os.path.exists(video_discord_path):
                 size_mb = os.path.getsize(video_discord_path) / (1024 * 1024)
                 if size_mb < 8.0:
-                    webhook_video = DiscordWebhook(url=AppConfig.DISCORD_WEBHOOK_URL,
-                                                   username=f"Face Guard (Камера {self.cam_id + 1})")
-                    webhook_video.content = f"📹 Видео с камеры {self.cam_id + 1} ({AppConfig.VIDEO_DURATION} сек)"
+                    vw = DiscordWebhook(url=AppConfig.DISCORD_WEBHOOK_URL,
+                                        username=f"Face Guard (Камера {self.cam_id + 1})")
+                    vw.content = f"📹 Видео с камеры {self.cam_id + 1} ({duration} сек)"
                     with open(video_discord_path, "rb") as f:
-                        webhook_video.add_file(file=f.read(), filename=video_discord_filename)
-                    webhook_video.execute()
+                        vw.add_file(file=f.read(), filename=video_discord_filename)
+                    vw.execute()
                     print(f"[CAM {self.cam_id}] ✅ Лёгкое видео отправлено в Discord")
 
+            # ==================== СОБЫТИЕ НА САЙТ ====================
             event_data = {
                 'timestamp': datetime.now().strftime("%H:%M:%S"),
                 'cam_id': self.cam_id,
@@ -210,3 +193,29 @@ class CameraProcessor:
 
         except Exception as e:
             print(f"[CAM {self.cam_id}] Ошибка обработки тревоги: {e}")
+
+    # ====================== УНИВЕРСАЛЬНАЯ ЗАПИСЬ ВИДЕО ======================
+    def _record_video(self, output_path, width, height, fps=20, fourcc='XVID', resize=False):
+        codec = cv2.VideoWriter_fourcc(*fourcc)
+        out = cv2.VideoWriter(output_path, codec, fps, (width, height))
+
+        if not out.isOpened():
+            print(f"[CAM {self.cam_id}] ❌ Не удалось открыть VideoWriter для {output_path}")
+            return
+
+        start = time.time()
+        frames = 0
+
+        while (time.time() - start) < AppConfig.VIDEO_DURATION and self.running:
+            ret, frame = self.cap.read()
+            if ret and frame is not None:
+                if resize:
+                    frame = cv2.resize(frame, (width, height))
+                out.write(frame)
+                frames += 1
+            else:
+                time.sleep(0.005)
+
+        out.release()
+        real_duration = time.time() - start
+        print(f"[CAM {self.cam_id}] ✅ Записано {frames} кадров за {real_duration:.2f} сек → {output_path}")
