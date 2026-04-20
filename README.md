@@ -29,8 +29,8 @@
 
 1. **Склонируйте репозиторий**:
    ```bash
-   git clone https://github.com/wloudy/face-guard.git
-   cd face-guard
+   git clone https://github.com/wloudy/face-guard-system.git
+   cd face-guard-system
 2. Создайте виртуальное окружение (рекомендуется):
     ```bash
     python -m venv .venv
