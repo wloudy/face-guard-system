@@ -6,8 +6,15 @@ class AppConfig:
     KNOWN_FACES_DIR = "known_faces"
     ALERTS_DIR = "alerts"
 
+    CAMERA_SCAN_MAX = 10
     CAMERA_INDICES = [0, 1]
     CAMERA_ENABLED = {idx: True for idx in CAMERA_INDICES}
+
+    CAMERA_NAMES = {}
+
+    ALLOW_REMOTE_SHUTDOWN = False
+
+    AUTO_OPEN_BROWSER = True
 
     SCALE_FACTOR = 0.25
     TOLERANCE = 0.55
