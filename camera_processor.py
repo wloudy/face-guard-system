@@ -22,6 +22,7 @@ class CameraProcessor:
         self.cap = None
         self.running = False
         self.thread = None
+        self.cap_lock = threading.Lock()
         self.latest_frame = None
         self.frame_lock = threading.Lock()
         self.last_notification = 0
@@ -71,7 +72,8 @@ class CameraProcessor:
                 time.sleep(0.3)
                 continue
 
-            ret, frame = self.cap.read()
+            with self.cap_lock:
+                ret, frame = self.cap.read()
             if not ret or frame is None:
                 time.sleep(0.05)
                 continue
@@ -129,7 +131,7 @@ class CameraProcessor:
         cam_str = f"cam{self.cam_id}"
 
         photo_filename = f"photo_{cam_str}_{timestamp}.jpg"
-        video_full_filename = f"video_full_{cam_str}_{timestamp}.avi"      # для сайта
+        video_full_filename = f"video_full_{cam_str}_{timestamp}.avi"
         video_discord_filename = f"video_discord_{cam_str}_{timestamp}.avi"
 
         photo_path = os.path.join(AppConfig.ALERTS_DIR, photo_filename)
@@ -137,20 +139,42 @@ class CameraProcessor:
         video_discord_path = os.path.join(AppConfig.ALERTS_DIR, video_discord_filename)
 
         try:
-            cv2.imwrite(photo_path, display_frame)
+            ok, buf = cv2.imencode(".jpg", display_frame)
+            if not ok:
+                raise RuntimeError("Не удалось закодировать фото в JPEG")
+            buf.tofile(photo_path)
 
             duration = AppConfig.VIDEO_DURATION
 
             print(f"[CAM {self.cam_id}] 🎥 Запись качественного видео для сайта...")
             self._record_video(video_full_path, orig_width, orig_height, fps=20, fourcc='XVID')
 
-            print(f"[CAM {self.cam_id}] 🎥 Создание сжатой версии для Discord...")
-            self._record_video(video_discord_path, 640, 360, fps=15, fourcc='MJPG', resize=True)
+            event_data = {
+                'timestamp': datetime.now().strftime("%H:%M:%S"),
+                'cam_id': self.cam_id,
+                'cam_name': str(getattr(AppConfig, "CAMERA_NAMES", {}).get(self.cam_id) or f"Камера {self.cam_id + 1}"),
+                'photo': photo_filename,
+                'video': video_full_filename,
+                'message': 'Обнаружен Unknown!'
+            }
+            self.socketio.emit('new_event', event_data)
+            if self.event_callback:
+                self.event_callback(event_data)
 
-            webhook = DiscordWebhook(url=AppConfig.DISCORD_WEBHOOK_URL,
-                                     username=f"Face Guard (Камера {self.cam_id + 1})")
-            embed = DiscordEmbed(title=f"🚨 UNKNOWN FACE — Камера {self.cam_id + 1}",
-                                 description="Обнаружен незнакомец", color=0xff0000)
+            print(f"[CAM {self.cam_id}] ✅ Событие отправлено на сайт")
+
+            print(f"[CAM {self.cam_id}] 🎥 Создание сжатой версии для Discord...")
+            self._record_video(video_discord_path, 640, 360, fps=15, fourcc='XVID', resize=True)
+
+            webhook = DiscordWebhook(
+                url=AppConfig.DISCORD_WEBHOOK_URL,
+                username=f"Face Guard (Камера {self.cam_id + 1})"
+            )
+            embed = DiscordEmbed(
+                title=f"🚨 UNKNOWN FACE — Камера {self.cam_id + 1}",
+                description="Обнаружен незнакомец",
+                color=0xff0000
+            )
             embed.set_timestamp()
             webhook.add_embed(embed)
 
@@ -162,27 +186,15 @@ class CameraProcessor:
             if os.path.exists(video_discord_path):
                 size_mb = os.path.getsize(video_discord_path) / (1024 * 1024)
                 if size_mb < 8.0:
-                    vw = DiscordWebhook(url=AppConfig.DISCORD_WEBHOOK_URL,
-                                        username=f"Face Guard (Камера {self.cam_id + 1})")
+                    vw = DiscordWebhook(
+                        url=AppConfig.DISCORD_WEBHOOK_URL,
+                        username=f"Face Guard (Камера {self.cam_id + 1})"
+                    )
                     vw.content = f"📹 Видео с камеры {self.cam_id + 1} ({duration} сек)"
                     with open(video_discord_path, "rb") as f:
                         vw.add_file(file=f.read(), filename=video_discord_filename)
                     vw.execute()
                     print(f"[CAM {self.cam_id}] ✅ Лёгкое видео отправлено в Discord")
-
-            event_data = {
-                'timestamp': datetime.now().strftime("%H:%M:%S"),
-                'cam_id': self.cam_id,
-                'cam_name': f"Камера {self.cam_id + 1}",
-                'photo': photo_filename,
-                'video': video_full_filename,
-                'message': 'Обнаружен Unknown!'
-            }
-            self.socketio.emit('new_event', event_data)
-            if self.event_callback:
-                self.event_callback(event_data)
-
-            print(f"[CAM {self.cam_id}] ✅ Событие отправлено на сайт")
 
         except Exception as e:
             print(f"[CAM {self.cam_id}] Ошибка обработки тревоги: {e}")
@@ -197,14 +209,24 @@ class CameraProcessor:
 
         start = time.time()
         frames = 0
+        frame_interval = 1.0 / float(max(1, fps))
+        next_frame_time = start
 
         while (time.time() - start) < AppConfig.VIDEO_DURATION and self.running:
-            ret, frame = self.cap.read()
+            now = time.time()
+            sleep_for = next_frame_time - now
+            if sleep_for > 0:
+                time.sleep(min(sleep_for, 0.05))
+                continue
+
+            with self.cap_lock:
+                ret, frame = self.cap.read()
             if ret and frame is not None:
                 if resize:
                     frame = cv2.resize(frame, (width, height))
                 out.write(frame)
                 frames += 1
+                next_frame_time += frame_interval
             else:
                 time.sleep(0.005)
 
