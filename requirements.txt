@@ -3,7 +3,10 @@ Flask-SocketIO==5.4.1
 opencv-python==4.9.0.80
 face-recognition==1.3.0
 discord-webhook==1.3.1
-numpy
+pygrabber
+comtypes
+# OpenCV 4.9 wheels are built against NumPy 1.x on Windows (NumPy 2.x breaks cv2 import).
+numpy==1.26.4
 pillow
 
 Werkzeug==3.0.3
