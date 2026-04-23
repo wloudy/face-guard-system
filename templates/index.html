@@ -113,6 +113,57 @@
             background: #1f2937;
             text-align: center;
         }
+
+        .select-wrap {
+            position: relative;
+            width: 100%;
+        }
+
+        .camera-select {
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            width: 100%;
+            background: rgba(15, 23, 42, 0.92);
+            border: 1px solid rgba(51, 65, 85, 0.9);
+            color: #e2e8f0;
+            border-radius: 18px;
+            padding: 12px 44px 12px 16px;
+            outline: none;
+            transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        }
+
+        .camera-select:hover {
+            border-color: rgba(74, 222, 128, 0.55);
+        }
+
+        .camera-select:focus {
+            border-color: rgba(74, 222, 128, 0.9);
+            box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.18), 0 10px 30px rgba(0, 0, 0, 0.35);
+        }
+
+        .select-arrow {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            width: 30px;
+            height: 30px;
+            border-radius: 9999px;
+            background: rgba(148, 163, 184, 0.12);
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #94a3b8;
+        }
+
+        .select-arrow svg {
+            width: 16px;
+            height: 16px;
+        }
     </style>
 </head>
 <body class="min-h-screen relative">
@@ -133,7 +184,7 @@
         </div>
 
         <div id="tab-content-0">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 justify-center" id="cameras-container"></div>
+            <div class="grid grid-cols-1 lg:grid-cols-1 gap-8 justify-center" id="cameras-container"></div>
         </div>
 
         <div id="tab-content-1" class="hidden">
@@ -147,6 +198,44 @@
         </h2>
 
         <div class="space-y-6 text-sm">
+            <div>
+                <div class="flex justify-between mb-2">
+                    <span>Камера</span>
+                    <span class="text-slate-500">выбор</span>
+                </div>
+                <div class="select-wrap">
+                    <select id="camera-select" class="camera-select">
+                        <option value="">Загрузка камер...</option>
+                    </select>
+                    <div class="select-arrow" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="flex justify-between mb-2">
+                    <span>Показывать камер</span>
+                    <span class="text-slate-500">вид</span>
+                </div>
+                <div class="select-wrap">
+                    <select id="camera-count-select" class="camera-select">
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="4">4</option>
+                        <option value="all">Все</option>
+                    </select>
+                    <div class="select-arrow" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="text-xs text-slate-500 mt-2">
+                    Чем больше камер, тем выше нагрузка на CPU/сеть.
+                </div>
+            </div>
             <div>
                 <div class="flex justify-between mb-2">
                     <span>Scale Factor</span>
@@ -176,6 +265,11 @@
         <button id="apply-btn"
                 class="mt-6 w-full bg-emerald-600 hover:bg-emerald-700 py-3 rounded-2xl font-medium">
             Применить настройки
+        </button>
+
+        <button id="shutdown-btn"
+                class="mt-3 w-full bg-red-600/90 hover:bg-red-600 py-3 rounded-2xl font-medium border border-red-400/20">
+            Остановить программу
         </button>
     </div>
 
@@ -223,27 +317,113 @@
             }).catch(err => console.error('Ошибка применения настроек:', err));
         });
 
-        function createCameras(cameras) {
+        document.getElementById('shutdown-btn').addEventListener('click', async () => {
+            const ok = confirm('Остановить Face Guard? Камеры и сайт перестанут работать.');
+            if (!ok) return;
+
+            const btn = document.getElementById('shutdown-btn');
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Останавливаю...';
+
+            try {
+                const r = await fetch('/api/shutdown', { method: 'POST' });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    alert(data.message || 'Не удалось остановить приложение');
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                    return;
+                }
+
+                btn.textContent = 'Выключено';
+                setTimeout(() => location.reload(), 1500);
+            } catch (e) {
+                console.error('Ошибка shutdown:', e);
+                btn.disabled = false;
+                btn.textContent = originalText;
+                alert('Ошибка сети при выключении');
+            }
+        });
+
+        function pickCamerasForGrid(cameras, count, selectedId) {
+            if (!Array.isArray(cameras) || cameras.length === 0) return [];
+
+            const enabled = cameras.filter(c => c.enabled);
+            const disabled = cameras.filter(c => !c.enabled);
+            const ordered = enabled.concat(disabled);
+
+            if (count === 1) {
+                const chosen = ordered.find(c => c.id === selectedId) || ordered[0];
+                return chosen ? [chosen] : [];
+            }
+
+            if (count === 'all') return ordered;
+            const n = Math.max(1, Number(count));
+            if (!Number.isFinite(n)) return ordered;
+            return ordered.slice(0, n);
+        }
+
+        function applyGridLayout(count) {
+            const container = document.getElementById('cameras-container');
+            container.className = 'grid gap-8 justify-center';
+
+            if (count === 1) {
+                container.classList.add('grid-cols-1', 'lg:grid-cols-1');
+                return;
+            }
+
+            if (count === 2) {
+                container.classList.add('grid-cols-1', 'lg:grid-cols-2');
+                return;
+            }
+
+            // 4+ или all
+            container.classList.add('grid-cols-1', 'md:grid-cols-2', 'xl:grid-cols-2');
+        }
+
+        function createCameras(cameras, selectedId, count) {
             const container = document.getElementById('cameras-container');
             container.innerHTML = '';
 
-            cameras.forEach(id => {
+            const picked = pickCamerasForGrid(cameras, count, selectedId);
+            applyGridLayout(count);
+
+            if (!picked.length) {
+                container.innerHTML = `
+                    <div class="no-camera rounded-3xl border border-slate-700">
+                        <i class="fas fa-video-slash text-6xl mb-6 text-slate-500"></i>
+                        <p class="text-slate-400 font-medium text-lg">Камеры не найдены</p>
+                        <p class="text-slate-500">Проверьте подключение и права доступа</p>
+                    </div>
+                `;
+                return;
+            }
+
+            picked.forEach(cam => {
+                const id = cam.id;
                 const div = document.createElement('div');
                 div.innerHTML = `
                     <div class="camera-container" id="frame-${id}">
                         <div class="camera-header">
                             <div class="flex items-center gap-3">
                                 <span class="text-emerald-400">●</span>
-                                <span class="font-semibold">Камера ${id + 1}</span>
+                                <span class="font-semibold">${cam.name}</span>
                             </div>
                             <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" id="toggle-${id}" checked onchange="toggleCamera(${id})" class="sr-only peer">
+                                <input type="checkbox" id="toggle-${id}" ${cam.enabled ? 'checked' : ''} onchange="toggleCamera(${id})" class="sr-only peer">
                                 <div class="w-11 h-6 bg-gray-700 rounded-full peer peer-checked:bg-emerald-500"></div>
                                 <div class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-all peer-checked:translate-x-5"></div>
                             </label>
                         </div>
                         <div class="camera-stream" id="stream-container-${id}">
-                            <img src="/video_feed/${id}" class="stream-img" id="stream-${id}">
+                            ${cam.enabled ? `<img src="/video_feed/${id}" class="stream-img" id="stream-${id}">` : `
+                                <div class="no-camera">
+                                    <i class="fas fa-video-slash text-6xl mb-6 text-slate-500"></i>
+                                    <p class="text-slate-400 font-medium text-lg">Камера отключена</p>
+                                    <p class="text-slate-500">Нет сигнала</p>
+                                </div>
+                            `}
                         </div>
                     </div>
                 `;
@@ -310,7 +490,108 @@
             container.insertAdjacentHTML('afterbegin', html);
         }
 
-        createCameras([0, 1]);
+        let camerasCache = [];
+
+        function populateCameraSelect(cameras) {
+            const select = document.getElementById('camera-select');
+            select.innerHTML = '';
+            cameras.forEach(cam => {
+                const opt = document.createElement('option');
+                opt.value = String(cam.id);
+                opt.textContent = cam.name;
+                select.appendChild(opt);
+            });
+        }
+
+        function getSavedCameraCount() {
+            const raw = localStorage.getItem('camera_grid_count');
+            if (!raw) return 1;
+            if (raw === 'all') return 'all';
+            const n = Number(raw);
+            return Number.isFinite(n) ? n : 1;
+        }
+
+        function saveCameraCount(count) {
+            localStorage.setItem('camera_grid_count', String(count));
+        }
+
+        function getSavedCameraId() {
+            const raw = localStorage.getItem('selected_camera_id');
+            if (raw === null || raw === '') return null;
+            const n = Number(raw);
+            return Number.isFinite(n) ? n : null;
+        }
+
+        function saveCameraId(camId) {
+            localStorage.setItem('selected_camera_id', String(camId));
+        }
+
+        function updateCameraSelectEnabledState(count) {
+            const camSelect = document.getElementById('camera-select');
+            const hint = camSelect?.parentElement?.parentElement?.querySelector('.text-xs');
+            const isSingle = (count === 1);
+
+            camSelect.disabled = !isSingle;
+            camSelect.style.opacity = isSingle ? '1' : '0.55';
+            camSelect.style.cursor = isSingle ? 'pointer' : 'not-allowed';
+
+            if (hint) hint.remove();
+            if (!isSingle) {
+                const el = document.createElement('div');
+                el.className = 'text-xs text-slate-500 mt-2';
+                el.textContent = 'Выбор камеры доступен только при отображении 1 камеры.';
+                camSelect.parentElement.parentElement.appendChild(el);
+            }
+        }
+
+        function renderSelectedCamera() {
+            const select = document.getElementById('camera-select');
+            const camId = Number(select.value);
+            if (!Number.isFinite(camId)) return;
+            saveCameraId(camId);
+            const count = getSavedCameraCount();
+            createCameras(camerasCache, camId, count);
+        }
+
+        document.getElementById('camera-select').addEventListener('change', renderSelectedCamera);
+        document.getElementById('camera-count-select').addEventListener('change', () => {
+            const raw = document.getElementById('camera-count-select').value;
+            const count = (raw === 'all') ? 'all' : Number(raw);
+            saveCameraCount(raw);
+            updateCameraSelectEnabledState(count);
+
+            const savedId = getSavedCameraId();
+            const camId = (savedId !== null && camerasCache.some(c => c.id === savedId))
+                ? savedId
+                : (camerasCache[0]?.id ?? 0);
+
+            createCameras(camerasCache, camId, count);
+        });
+
+        fetch('/api/cameras')
+            .then(r => r.json())
+            .then(cameras => {
+                camerasCache = cameras || [];
+                populateCameraSelect(camerasCache);
+
+                const savedCount = getSavedCameraCount();
+                document.getElementById('camera-count-select').value = (savedCount === 'all') ? 'all' : String(savedCount);
+                updateCameraSelectEnabledState(savedCount);
+
+                const saved = getSavedCameraId();
+                const initial = (saved !== null && camerasCache.some(c => c.id === saved))
+                    ? saved
+                    : (camerasCache[0]?.id ?? 0);
+
+                document.getElementById('camera-select').value = String(initial);
+                createCameras(camerasCache, initial, savedCount);
+            })
+            .catch(err => {
+                console.error('Ошибка загрузки списка камер:', err);
+                const select = document.getElementById('camera-select');
+                select.innerHTML = '<option value="">Ошибка</option>';
+            });
+
         switchTab(0);
     </script>
 </body>
